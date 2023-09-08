@@ -38,6 +38,9 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "tsl/lib/gtl/map_util.h"
+#include "tsl/platform/errors.h"
+#include "tsl/platform/human_readable_json.h"
 #include "xla/hlo/ir/dfs_hlo_visitor.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
@@ -56,9 +59,6 @@ limitations under the License.
 #include "xla/status_macros.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
-#include "tsl/lib/gtl/map_util.h"
-#include "tsl/platform/errors.h"
-#include "tsl/platform/human_readable_json.h"
 
 namespace xla {
 
@@ -967,11 +967,14 @@ StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
       if (!proto.dimensions().empty()) {
         inferred_dimension = proto.dimensions()[0];
       }
-      TF_RET_CHECK(shape.IsArray() && operands(0)->shape().IsArray() &&
-                   ShapeUtil::ElementsIn(shape) ==
-                       ShapeUtil::ElementsIn(operands(0)->shape()))
-          << "shape: " << ShapeUtil::HumanString(shape)
-          << " operand: " << ShapeUtil::HumanString(operands(0)->shape());
+      if (!shape.is_unbounded_dynamic() &&
+          !operands(0)->shape().is_unbounded_dynamic()) {
+        TF_RET_CHECK(shape.IsArray() && operands(0)->shape().IsArray() &&
+                     ShapeUtil::ElementsIn(shape) ==
+                         ShapeUtil::ElementsIn(operands(0)->shape()))
+            << "shape: " << ShapeUtil::HumanString(shape)
+            << " operand: " << ShapeUtil::HumanString(operands(0)->shape());
+      }
       instruction = CreateReshape(shape, operands(0), inferred_dimension);
       break;
     }
@@ -1810,10 +1813,13 @@ HloInstruction::CreateBroadcastSequence(
 
 /* static */ std::unique_ptr<HloInstruction> HloInstruction::CreateReshape(
     const Shape& shape, HloInstruction* operand, int64_t inferred_dimension) {
-  CHECK_EQ(ShapeUtil::ElementsIn(shape),
-           ShapeUtil::ElementsIn(operand->shape()))
-      << "shape: " << ShapeUtil::HumanString(shape)
-      << " operand: " << ShapeUtil::HumanString(operand->shape());
+  if (!shape.is_unbounded_dynamic() &&
+      !operand->shape().is_unbounded_dynamic()) {
+    CHECK_EQ(ShapeUtil::ElementsIn(shape),
+             ShapeUtil::ElementsIn(operand->shape()))
+        << "shape: " << ShapeUtil::HumanString(shape)
+        << " operand: " << ShapeUtil::HumanString(operand->shape());
+  }
 
   return std::make_unique<HloReshapeInstruction>(shape, operand,
                                                  inferred_dimension);
